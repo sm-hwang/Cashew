@@ -19,6 +19,7 @@ import 'package:budget/widgets/framework/pageFramework.dart';
 import 'package:budget/widgets/settingsContainers.dart';
 import 'package:budget/widgets/statusBox.dart';
 import 'package:budget/widgets/tappable.dart';
+import 'package:budget/widgets/textInput.dart';
 import 'package:budget/widgets/textWidgets.dart';
 import 'package:budget/widgets/util/appLinks.dart';
 import 'package:flutter/foundation.dart';
@@ -383,7 +384,45 @@ class _AutoTransactionsPageEmailState extends State<AutoTransactionsPageEmail> {
             opacity: canReadEmails ? 1 : 0.4,
             child: GmailApiScreen(),
           ),
-        )
+        ),
+        SettingsContainerSwitch(
+          title: "AI Categorization",
+          description:
+              "When a merchant has no saved category, ask Gemini to pick one of your existing categories. Each merchant is asked about only once, then cached.",
+          onSwitched: (value) async {
+            updateSettings("aiCategorizationEnabled", value,
+                updateGlobalState: false, pagesNeedingRefresh: []);
+          },
+          initialValue: appStateSettings["aiCategorizationEnabled"],
+          icon: appStateSettings["outlinedIcons"]
+              ? Icons.auto_awesome_outlined
+              : Icons.auto_awesome_rounded,
+        ),
+        Padding(
+          padding: const EdgeInsetsDirectional.only(top: 5, bottom: 5),
+          child: TextInput(
+            labelText: "Gemini API Key",
+            initialValue: appStateSettings["geminiApiKey"],
+            obscureText: true,
+            icon: appStateSettings["outlinedIcons"]
+                ? Icons.key_outlined
+                : Icons.key_rounded,
+            onChanged: (value) {
+              updateSettings("geminiApiKey", value,
+                  updateGlobalState: false, pagesNeedingRefresh: []);
+            },
+          ),
+        ),
+        Padding(
+          padding:
+              const EdgeInsetsDirectional.only(bottom: 5, start: 20, end: 20),
+          child: TextFont(
+            text:
+                "Only the merchant name and your category names are sent to Google — never amounts or account details. On Gemini's free tier, Google may use submitted data to improve its products.",
+            fontSize: 13,
+            maxLines: 10,
+          ),
+        ),
       ],
     );
   }

@@ -124,6 +124,8 @@ Future<Map<String, dynamic>> getDefaultPreferences() async {
     "hasOnboarded": false,
     "restrictAmountOfInitiallyLoadedTransactions": false,
     "autoAddAssociatedTitles": true,
+    "aiCategorizationEnabled": false,
+    "geminiApiKey": "",
     "AutoTransactions-canReadEmails": false,
     "notificationScanningDebug": false,
     "notificationScanning": false,
