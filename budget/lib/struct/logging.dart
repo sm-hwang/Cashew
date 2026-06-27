@@ -50,7 +50,10 @@ captureLogs(Function body) {
     () async {
       await body();
     },
-    (error, stackTrace) {},
+    (error, stackTrace) {
+      // Capture otherwise-swallowed async errors into the in-app log
+      logService.log("Unhandled zone error: $error\n$stackTrace");
+    },
     zoneSpecification: ZoneSpecification(
       print: (Zone self, ZoneDelegate parent, Zone zone, String message) {
         logService.log(message);

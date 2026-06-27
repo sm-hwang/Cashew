@@ -1336,6 +1336,7 @@ double? getAmountFromString(String inputString) {
 enum PlatformOS {
   isIOS,
   isAndroid,
+  isMacOS,
   web,
 }
 
@@ -1348,6 +1349,8 @@ PlatformOS? getPlatform({bool ignoreEmulation = false}) {
     return PlatformOS.isIOS;
   } else if (Platform.isAndroid) {
     return PlatformOS.isAndroid;
+  } else if (Platform.isMacOS) {
+    return PlatformOS.isMacOS;
   }
   return null;
 }

@@ -49,6 +49,7 @@ Future initNotificationScanning() async {
 }
 
 Future<bool> requestReadNotificationPermission() async {
+  if (getPlatform(ignoreEmulation: true) != PlatformOS.isAndroid) return false;
   bool status = await NotificationListenerService.isPermissionGranted();
   if (status != true) {
     status = await NotificationListenerService.requestPermission();

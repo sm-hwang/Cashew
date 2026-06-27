@@ -1,3 +1,4 @@
+import 'package:budget/functions.dart';
 import 'package:budget/struct/settings.dart';
 import 'package:budget/widgets/animatedExpanded.dart';
 import 'package:budget/widgets/notificationsSettings.dart';
@@ -55,6 +56,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   : Icons.warning_rounded,
               color: Theme.of(context).colorScheme.error,
               onTap: () {
+                // app_settings (open OS settings) is iOS/Android only
+                if (getPlatform() != PlatformOS.isIOS &&
+                    getPlatform() != PlatformOS.isAndroid) return;
                 AppSettings.openAppSettings(type: AppSettingsType.notification);
               },
             ),

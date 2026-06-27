@@ -19,7 +19,9 @@ Throttler quickActionThrottler =
     Throttler(duration: Duration(milliseconds: 350));
 
 void runQuickActionsPayLoads(context) async {
-  if (kIsWeb) return;
+  // quick_actions only supports iOS and Android (no macOS/desktop)
+  if (getPlatform() != PlatformOS.isIOS &&
+      getPlatform() != PlatformOS.isAndroid) return;
   final QuickActions quickActions = const QuickActions();
   quickActions.initialize((String quickAction) async {
     if (!quickActionThrottler.canProceed()) return;
