@@ -608,9 +608,14 @@ Future<void> parseEmailsInBackground(context,
         }
         if (selectedCategory == null) continue;
 
-        title = filterEmailTitle(title);
-
+        // Cache against the full merchant title (e.g. "Chipotle #1234") so the
+        // next scan of the same merchant is a cache hit and Gemini is not
+        // re-queried. A different store number (e.g. "Chipotle #2345") is a
+        // distinct key and will miss as intended. filterEmailTitle is applied
+        // afterwards only to clean up the displayed transaction name.
         await addAssociatedTitles(title, selectedCategory);
+
+        title = filterEmailTitle(title);
 
         Transaction transactionToAdd = Transaction(
           transactionPk: "-1",
