@@ -52,8 +52,8 @@ Android, iOS, or web changes.
 | Decision | Choice |
 |---|---|
 | OAuth client | **New** iOS-type OAuth client registered to the macOS bundle id `com.budget.budget` (the iOS client is bound to `com.budget.tracker-app` and cannot be reused) |
-| Client ID storage | A `macosClientId` constant in `firebase_options.dart`, read **directly** (never via `DefaultFirebaseOptions.currentPlatform`, which throws `UnsupportedError` on macOS) |
-| Secret handling | The client ID and reversed client ID are **not secrets** (they ship in the app binary / Info.plist); they are committed to the repo |
+| Client ID storage | Injected at build time, **never committed**. Dart reads `String.fromEnvironment('GOOGLE_MACOS_CLIENT_ID')` (via `--dart-define`); the macOS `Info.plist` redirect scheme reads `$(GOOGLE_REVERSED_CLIENT_ID)` from a **git-ignored** `macos/Runner/Configs/Secrets.xcconfig`. |
+| Secret handling | **Keep the client ID out of the git repo** (user requirement). Two git-ignored inputs (a `--dart-define` value and `Secrets.xcconfig`), each with a committed `.example` template. The code compiles without them (empty string) and macOS sign-in fails gracefully until they are supplied. NB: this plugin version (`google_sign_in_ios 5.9.0`) does **not** read `GIDClientID` from `Info.plist` — it requires the client ID passed from Dart — so Dart must inject it; a single shared file is not possible. |
 | Export-for-migration polish | Out of scope; revisit later |
 
 ## Prerequisite — your Google Cloud Console work (project `267621253497`)
@@ -77,22 +77,26 @@ on macOS then fails gracefully via the existing error path).
 
 The change set is four edits across config and one Dart file. No new modules.
 
-### Section 1 — Client ID constant
+### Section 1 — Client ID constant (build-time, not committed)
 
 `firebase_options.dart` already holds the iOS client ID as a literal and
 throws `UnsupportedError` for macOS in `currentPlatform`. Add a sibling
-constant for macOS that is read directly, bypassing `currentPlatform`:
+constant for macOS that is read directly (bypassing `currentPlatform`) and
+sourced from a compile-time environment value so the real id is **never
+committed**:
 
 ```dart
-// macOS uses google_sign_in_macos with its own OAuth client (bundle
-// com.budget.budget). Read directly — currentPlatform throws on macOS.
+// macOS uses its own OAuth client (bundle com.budget.budget). Injected at
+// build time via --dart-define so the value is not committed. Read directly —
+// currentPlatform throws on macOS and cannot carry this.
 static const String macosClientId =
-    '267621253497-XXXX.apps.googleusercontent.com';
+    String.fromEnvironment('GOOGLE_MACOS_CLIENT_ID');
 ```
 
-Exact placement (top-level const vs. a static on `DefaultFirebaseOptions`) is
-an implementation detail; it must be reachable from `accountAndBackup.dart`
-without invoking `DefaultFirebaseOptions.currentPlatform`.
+Supplied at run/build time, e.g.
+`flutter run -d macos --dart-define=GOOGLE_MACOS_CLIENT_ID=<id>` or via a
+git-ignored `--dart-define-from-file` JSON. When absent it is the empty
+string and macOS sign-in fails gracefully.
 
 ### Section 2 — Sign-in branch
 
@@ -124,10 +128,11 @@ The existing scope list (userinfo, drive appdata, and the Gmail scopes when
 `gMailPermissions == true`) is unchanged. The existing try/catch around the
 whole function already handles failure with the standard error snackbar.
 
-### Section 3 — Info.plist URL scheme
+### Section 3 — Info.plist URL scheme (build variable, not committed)
 
 `macos/Runner/Info.plist` gains a `CFBundleURLTypes` entry registering the
-reversed client ID as a URL scheme (the OAuth redirect target):
+reversed client ID as a URL scheme (the OAuth redirect target). The committed
+plist references a **build variable** so the real value stays out of git:
 
 ```xml
 <key>CFBundleURLTypes</key>
@@ -135,11 +140,18 @@ reversed client ID as a URL scheme (the OAuth redirect target):
   <dict>
     <key>CFBundleURLSchemes</key>
     <array>
-      <string>com.googleusercontent.apps.267621253497-XXXX</string>
+      <string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
     </array>
   </dict>
 </array>
 ```
+
+`GOOGLE_REVERSED_CLIENT_ID` is defined in a **git-ignored**
+`macos/Runner/Configs/Secrets.xcconfig`, optionally `#include?`'d from the
+existing `Debug.xcconfig` and `Release.xcconfig`. A committed
+`Secrets.xcconfig.example` documents the format
+(`com.googleusercontent.apps.267621253497-XXXX`). The real file is added to
+`.gitignore`.
 
 ### Section 4 — Sandbox entitlements
 
@@ -180,5 +192,6 @@ Regression check: sign-in still works on at least one of Android/iOS/web
 ## Open items for the plan
 
 - The actual macOS client ID + reversed client ID values (provided by the user
-  from GCP).
-- Final placement of the `macosClientId` constant in `firebase_options.dart`.
+  from GCP). These go **only** into the git-ignored `--dart-define` input and
+  `Secrets.xcconfig` — never into a committed file.
+- Exact `.gitignore` entries and the `#include?` wiring for `Secrets.xcconfig`.
