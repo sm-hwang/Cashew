@@ -133,7 +133,11 @@ Future<bool> signInGoogle(
           ? signIn.GoogleSignIn(
               clientId: DefaultFirebaseOptions.currentPlatform.iosClientId,
               scopes: scopes)
-          : signIn.GoogleSignIn.standard(scopes: scopes);
+          : getPlatform() == PlatformOS.isMacOS
+              ? signIn.GoogleSignIn(
+                  clientId: DefaultFirebaseOptions.macosClientId,
+                  scopes: scopes)
+              : signIn.GoogleSignIn.standard(scopes: scopes);
       // googleSignIn?.currentUser?.clearAuthCache();
 
       final signIn.GoogleSignInAccount? account = silentSignIn == true

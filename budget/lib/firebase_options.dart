@@ -73,4 +73,11 @@ class DefaultFirebaseOptions {
     iosClientId: '267621253497-ih94g1srq37gun4mdmvadgl3ev588vpf.apps.googleusercontent.com',
     iosBundleId: 'com.budget.tracker-app',
   );
+
+  // macOS uses its own OAuth client (bundle com.budget.budget). Injected at
+  // build time via --dart-define so the value is NOT committed to the repo.
+  // Read directly — currentPlatform throws UnsupportedError on macOS.
+  // Empty when not supplied; macOS sign-in then fails gracefully.
+  static const String macosClientId =
+      String.fromEnvironment('GOOGLE_MACOS_CLIENT_ID');
 }
