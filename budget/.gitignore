@@ -53,6 +53,9 @@ app.*.map.json
 key.properties
 keystore.jks
 
+# macOS Google sign-in secret (real client id; keep out of git)
+/macos/Runner/Configs/Secrets.xcconfig
+
 /.firebase
 .firebase/
 
