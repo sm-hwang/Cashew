@@ -209,7 +209,7 @@ git add macos/Runner/Info.plist macos/Runner/Configs/Debug.xcconfig macos/Runner
 git commit -m "feat: macOS OAuth redirect scheme via git-ignored xcconfig"
 ```
 
-Before committing, confirm the staged diff contains only `$(GOOGLE_REVERSED_CLIENT_ID)`, the `XXXX` placeholder, and `#include?` lines — no real client id. (`git diff --cached | grep -i "\|<REAL_VALUE>"` should print nothing.)
+Before committing, confirm the staged diff contains only `$(GOOGLE_REVERSED_CLIENT_ID)`, the `XXXX` placeholder, and `#include?` lines — no real client id. (Scan the staged diff for the real client id's random suffix; it should print nothing.)
 
 ---
 
