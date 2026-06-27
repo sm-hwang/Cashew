@@ -75,6 +75,7 @@ Future<String?> aiCategorizeMerchant({
     if (text is! String) return null;
 
     final parsed = jsonDecode(text);
+    if (parsed is! Map) return null;
     final chosen = parsed['categoryId'];
     if (chosen is! String) return null;
 

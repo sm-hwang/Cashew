@@ -93,4 +93,16 @@ void main() {
     expect(result, isNull);
     expect(called, isFalse);
   });
+
+  test('returns null and makes no call when merchant is empty', () async {
+    var called = false;
+    final mock = MockClient((req) async {
+      called = true;
+      return http.Response('{}', 200);
+    });
+    final result = await aiCategorizeMerchant(
+        merchant: '', categories: _cats, apiKey: 'k', client: mock);
+    expect(result, isNull);
+    expect(called, isFalse);
+  });
 }
