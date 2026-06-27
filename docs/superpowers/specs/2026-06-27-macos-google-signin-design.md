@@ -1,0 +1,184 @@
+# macOS Google Sign-In (Phase 0) — Design
+
+**Date:** 2026-06-27
+**Status:** Approved for planning
+**App:** Cashew (`budget/`, Flutter)
+**Branch:** `macos-google-signin`
+
+## Summary
+
+Google Sign-In does not work on the macOS build, so the email scan, Gmail API,
+Drive, and the new AI categorization feature cannot run there. This is the
+"Phase 0" prerequisite called out in the AI-email-categorization design.
+
+The macOS desktop support already merged wraps Firebase init in a try/catch so
+startup doesn't crash (`main.dart:50`), but three things are still missing for
+sign-in to actually work on macOS:
+
+1. macOS has no OAuth client ID wired in — the sign-in code falls into the
+   `GoogleSignIn.standard()` branch (no client ID) and fails.
+2. `macos/Runner/Info.plist` has no OAuth redirect URL scheme.
+3. The macOS app sandbox lacks the `com.apple.security.network.client`
+   entitlement, which blocks **all** outbound traffic (sign-in, Gmail, Drive,
+   Gemini).
+
+This design fills exactly those gaps. It is platform-isolated: no behavior on
+Android, iOS, or web changes.
+
+## Goals
+
+- Google Sign-In completes on macOS with the Gmail scopes, so the email scan
+  (and therefore AI categorization) runs on macOS.
+- No regression to sign-in on Android, iOS, or web.
+- Fail safe: a missing/misconfigured client ID degrades to the existing
+  sign-in error snackbar, never a crash (consistent with the macOS
+  "never crash startup" approach).
+
+## Non-Goals
+
+- Firebase cloud sync on macOS (still unconfigured; the app runs without it).
+- Drive backup enablement on macOS (the same OAuth client could cover Drive
+  scopes later, but it is not a goal here).
+- Code signing, notarization, or distribution.
+- File-based data migration — **already supported** via the existing
+  "Export Data File" / "Import" in Settings (`settingsPage.dart:617–619`,
+  `exportDB.dart`). On macOS it writes the full `.sql` DB dump into the app's
+  sandbox container (`~/Library/Containers/com.budget.budget/Data/Documents/`);
+  this works today and is out of scope. A future "native Save As dialog"
+  polish for that export was deferred by the user.
+
+## Decisions (resolved during brainstorming)
+
+| Decision | Choice |
+|---|---|
+| OAuth client | **New** iOS-type OAuth client registered to the macOS bundle id `com.budget.budget` (the iOS client is bound to `com.budget.tracker-app` and cannot be reused) |
+| Client ID storage | A `macosClientId` constant in `firebase_options.dart`, read **directly** (never via `DefaultFirebaseOptions.currentPlatform`, which throws `UnsupportedError` on macOS) |
+| Secret handling | The client ID and reversed client ID are **not secrets** (they ship in the app binary / Info.plist); they are committed to the repo |
+| Export-for-migration polish | Out of scope; revisit later |
+
+## Prerequisite — your Google Cloud Console work (project `267621253497`)
+
+These steps cannot be done in code; they produce the client ID the
+implementation needs:
+
+- Create a new **OAuth client of type iOS** registered to bundle id
+  **`com.budget.budget`**.
+- Confirm the OAuth consent screen lists the Gmail readonly + modify scopes
+  (it should already, since Gmail works on Android/iOS) and add your Google
+  account as a **test user** if the app is in "testing".
+- This yields a **client ID** (`267621253497-XXXX.apps.googleusercontent.com`)
+  and its **reversed client ID** (`com.googleusercontent.apps.267621253497-XXXX`).
+
+The implementer will need the actual client ID value to wire in; until it is
+provided, the code change can be staged with the constant left empty (sign-in
+on macOS then fails gracefully via the existing error path).
+
+## Architecture
+
+The change set is four edits across config and one Dart file. No new modules.
+
+### Section 1 — Client ID constant
+
+`firebase_options.dart` already holds the iOS client ID as a literal and
+throws `UnsupportedError` for macOS in `currentPlatform`. Add a sibling
+constant for macOS that is read directly, bypassing `currentPlatform`:
+
+```dart
+// macOS uses google_sign_in_macos with its own OAuth client (bundle
+// com.budget.budget). Read directly — currentPlatform throws on macOS.
+static const String macosClientId =
+    '267621253497-XXXX.apps.googleusercontent.com';
+```
+
+Exact placement (top-level const vs. a static on `DefaultFirebaseOptions`) is
+an implementation detail; it must be reachable from `accountAndBackup.dart`
+without invoking `DefaultFirebaseOptions.currentPlatform`.
+
+### Section 2 — Sign-in branch
+
+`accountAndBackup.dart:132` currently is:
+
+```dart
+googleSignIn = getPlatform() == PlatformOS.isIOS
+    ? signIn.GoogleSignIn(
+        clientId: DefaultFirebaseOptions.currentPlatform.iosClientId,
+        scopes: scopes)
+    : signIn.GoogleSignIn.standard(scopes: scopes);
+```
+
+Add a macOS arm so macOS passes its own client ID instead of falling into
+`standard()`:
+
+```dart
+googleSignIn = getPlatform() == PlatformOS.isIOS
+    ? signIn.GoogleSignIn(
+        clientId: DefaultFirebaseOptions.currentPlatform.iosClientId,
+        scopes: scopes)
+    : getPlatform() == PlatformOS.isMacOS
+        ? signIn.GoogleSignIn(
+            clientId: DefaultFirebaseOptions.macosClientId, scopes: scopes)
+        : signIn.GoogleSignIn.standard(scopes: scopes);
+```
+
+The existing scope list (userinfo, drive appdata, and the Gmail scopes when
+`gMailPermissions == true`) is unchanged. The existing try/catch around the
+whole function already handles failure with the standard error snackbar.
+
+### Section 3 — Info.plist URL scheme
+
+`macos/Runner/Info.plist` gains a `CFBundleURLTypes` entry registering the
+reversed client ID as a URL scheme (the OAuth redirect target):
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+  <dict>
+    <key>CFBundleURLSchemes</key>
+    <array>
+      <string>com.googleusercontent.apps.267621253497-XXXX</string>
+    </array>
+  </dict>
+</array>
+```
+
+### Section 4 — Sandbox entitlements
+
+Add `com.apple.security.network.client` to **both**
+`macos/Runner/DebugProfile.entitlements` and
+`macos/Runner/Release.entitlements` (Release currently has only
+`app-sandbox`). Without it the sandbox blocks every outbound connection —
+sign-in, Gmail, Drive, and Gemini. The existing `network.server` (debug) and
+`app-sandbox` keys are kept.
+
+## Error handling & safety
+
+- Platform-isolated: only the macOS arm and macOS Runner config are touched;
+  iOS/Android/web sign-in paths are untouched.
+- A missing/empty `macosClientId` or misconfigured client surfaces as the
+  existing `sign-in-error` snackbar via the current try/catch — never a crash.
+- No secrets introduced (client ID and reversed client ID are public values
+  embedded in the shipped app).
+
+## Testing
+
+OAuth and platform entitlements cannot be unit-tested. Verification is manual,
+on a Mac:
+
+1. Build and run the macOS app.
+2. In Auto Transactions, toggle **Read Emails** → Google Sign-In completes and
+   the consent screen shows the Gmail scopes.
+3. `testIfHasGmailAccess()` returns true (the app proceeds without forcing a
+   re-sign-in).
+4. Trigger an email scan → a transaction is created from a matching email.
+5. With a Gemini key set and AI categorization on, a first-seen merchant gets
+   an AI-assigned category (confirming outbound network works under the new
+   entitlement).
+
+Regression check: sign-in still works on at least one of Android/iOS/web
+(unchanged code path, but confirm the added ternary arm didn't disturb it).
+
+## Open items for the plan
+
+- The actual macOS client ID + reversed client ID values (provided by the user
+  from GCP).
+- Final placement of the `macosClientId` constant in `firebase_options.dart`.
