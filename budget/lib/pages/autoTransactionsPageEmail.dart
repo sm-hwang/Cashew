@@ -26,6 +26,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:budget/functions.dart';
+import 'package:budget/struct/aiCategorization.dart';
 import 'package:googleapis/gmail/v1.dart' as gMail;
 import 'package:html/parser.dart';
 import 'package:notification_listener_service/notification_event.dart';
@@ -120,11 +121,13 @@ Future queueTransactionFromMessage(String messageString,
   // however maybe the user doesn't want to queue it up if its missing details?
   if (amountDouble == null || title == null) return false;
 
-  TransactionCategory? category;
   TransactionAssociatedTitleWithCategory? foundTitle =
       (await database.getSimilarAssociatedTitles(title: title, limit: 1))
           .firstOrNull;
-  category = foundTitle?.category;
+  TransactionCategory? category = foundTitle?.category;
+  if (category == null) {
+    category = await aiCategorizeEmailMerchant(title);
+  }
   if (category == null) {
     category = await database
         .getCategoryInstanceOrNull(templateFound.defaultCategoryFk);
@@ -428,6 +431,33 @@ class _AutoTransactionsPageEmailState extends State<AutoTransactionsPageEmail> {
   }
 }
 
+// Bridges the email flow to the Gemini service: reads settings, gathers the
+// user's categories, asks for a classification, and resolves the chosen id to a
+// category. Returns null when the feature is off, unconfigured, or unsuccessful.
+// Never throws.
+Future<TransactionCategory?> aiCategorizeEmailMerchant(String rawTitle) async {
+  final bool enabled = appStateSettings["aiCategorizationEnabled"] == true;
+  final String apiKey = appStateSettings["geminiApiKey"] ?? "";
+  if (!enabled || apiKey.trim().isEmpty || rawTitle.trim().isEmpty) return null;
+  try {
+    final List<TransactionCategory> categories =
+        await database.getAllCategories();
+    final choices = categories
+        .map((c) => AiCategoryChoice(c.categoryPk, c.name))
+        .toList();
+    final String? chosenId = await aiCategorizeMerchant(
+      merchant: rawTitle,
+      categories: choices,
+      apiKey: apiKey,
+    );
+    if (chosenId == null) return null;
+    return await database.getCategoryInstanceOrNull(chosenId);
+  } catch (e) {
+    print("aiCategorizeEmailMerchant: error: $e");
+    return null;
+  }
+}
+
 Future<void> parseEmailsInBackground(context,
     {bool sayUpdates = false, bool forceParse = false}) async {
   if (appStateSettings["hasSignedIn"] == false) return;
@@ -573,6 +603,9 @@ Future<void> parseEmailsInBackground(context,
                 .firstOrNull;
 
         TransactionCategory? selectedCategory = foundTitle?.category;
+        if (selectedCategory == null) {
+          selectedCategory = await aiCategorizeEmailMerchant(title);
+        }
         if (selectedCategory == null) continue;
 
         title = filterEmailTitle(title);
