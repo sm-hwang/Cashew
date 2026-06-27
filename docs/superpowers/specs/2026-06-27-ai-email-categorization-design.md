@@ -4,6 +4,29 @@
 **Status:** Approved for planning
 **App:** Cashew (`budget/`, Flutter)
 
+## Scope revision (2026-06-27, during planning)
+
+After reviewing real merchant strings, the design was **simplified**. Two
+elements of the original design below are **dropped**:
+
+- **Merchant normalization** (Section 2) — removed. Most alert emails do not
+  carry store numbers / locations, and re-querying the occasional
+  `CHIPOTLE #1234` vs `CHIPOTLE #2345` is acceptable since the user revisits the
+  same locations. The cache key is the **raw title**, exactly as
+  `AssociatedTitles` already stores it.
+- **The `source` column + new exact `getCachedCategoryForMerchant` lookup**
+  (Section 1) — removed. With raw-title keys, the **existing**
+  `getSimilarAssociatedTitles` already serves as the cache read and
+  `addAssociatedTitles` already serves as the cache write. The user-correction
+  lock is automatic: a cache hit means Gemini is never called, so the AI path
+  can never overwrite a prior user (or AI) categorization. No DB migration.
+
+Net feature = **Gemini service + settings + a small change at the two
+cache-miss sites** (miss → ask Gemini → use result or fall through to today's
+behavior). Sections 1 and 2 below are retained for history but are superseded
+by this note; Sections 3–5 still apply. See the implementation plan for the
+authoritative task breakdown.
+
 ## Summary
 
 Cashew already scrapes credit-card-alert emails (AMEX, etc.) via Gmail and the
