@@ -178,7 +178,7 @@ Future<Map<String, dynamic>> getDefaultPreferences() async {
     "animationSpeed": 1.0,
     "logging": false,
     "sharedBudgets": false,
-    "emailScanning": false,
+    "emailScanning": true,
     "emailScanningPullToRefresh": false,
     "incognitoKeyboard": false,
     // the key is the budgetPk (in String!)
