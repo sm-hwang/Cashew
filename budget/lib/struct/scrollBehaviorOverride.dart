@@ -8,6 +8,8 @@ class ScrollBehaviorOverride extends MaterialScrollBehavior {
   Set<PointerDeviceKind> get dragDevices => {
         PointerDeviceKind.touch,
         PointerDeviceKind.mouse,
+        // Let MacBook trackpad swipe/pan gestures drag & scroll the UI.
+        PointerDeviceKind.trackpad,
       };
 
   @override
