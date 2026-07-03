@@ -1,3 +1,4 @@
+import 'package:budget/functions.dart';
 import 'package:budget/main.dart';
 import 'package:budget/widgets/navigationFramework.dart';
 import 'package:flutter/material.dart';
@@ -47,17 +48,24 @@ Map<Type, Action<Intent>> keyboardIntents = {
   ),
 };
 
-Map<ShortcutActivator, Intent> shortcuts = {
-  LogicalKeySet(LogicalKeyboardKey.escape): const EscapeIntent(),
-  LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.digit1):
-      const Digit1Intent(),
-  LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.digit2):
-      const Digit2Intent(),
-  LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.digit3):
-      const Digit3Intent(),
-  LogicalKeySet(LogicalKeyboardKey.control, LogicalKeyboardKey.digit4):
-      const Digit4Intent(),
-};
+Map<ShortcutActivator, Intent> buildShortcuts({required bool isMacOS}) {
+  SingleActivator mod(LogicalKeyboardKey key) =>
+      SingleActivator(key, meta: isMacOS, control: !isMacOS);
+  return {
+    const SingleActivator(LogicalKeyboardKey.escape): const EscapeIntent(),
+    mod(LogicalKeyboardKey.digit1): const Digit1Intent(),
+    mod(LogicalKeyboardKey.digit2): const Digit2Intent(),
+    mod(LogicalKeyboardKey.digit3): const Digit3Intent(),
+    mod(LogicalKeyboardKey.digit4): const Digit4Intent(),
+    mod(LogicalKeyboardKey.keyN): const NewTransactionIntent(),
+    mod(LogicalKeyboardKey.keyF): const SearchTransactionsIntent(),
+    mod(LogicalKeyboardKey.comma): const OpenSettingsIntent(),
+    mod(LogicalKeyboardKey.keyR): const RefreshSyncIntent(),
+  };
+}
+
+Map<ShortcutActivator, Intent> shortcuts =
+    buildShortcuts(isMacOS: getPlatform() == PlatformOS.isMacOS);
 
 class EscapeIntent extends Intent {
   const EscapeIntent();
@@ -77,4 +85,20 @@ class Digit3Intent extends Intent {
 
 class Digit4Intent extends Intent {
   const Digit4Intent();
+}
+
+class NewTransactionIntent extends Intent {
+  const NewTransactionIntent();
+}
+
+class SearchTransactionsIntent extends Intent {
+  const SearchTransactionsIntent();
+}
+
+class OpenSettingsIntent extends Intent {
+  const OpenSettingsIntent();
+}
+
+class RefreshSyncIntent extends Intent {
+  const RefreshSyncIntent();
 }
