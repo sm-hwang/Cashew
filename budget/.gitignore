@@ -63,3 +63,6 @@ keystore.jks
 .fvm/
 # Local debug run log
 error.txt
+
+# macOS build: dart-define key file (real client id; keep out of git)
+signin.json
