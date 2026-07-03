@@ -31,6 +31,7 @@ import 'package:googleapis/gmail/v1.dart' as gMail;
 import 'package:html/parser.dart';
 import 'package:notification_listener_service/notification_event.dart';
 import 'package:notification_listener_service/notification_listener_service.dart';
+import 'package:budget/struct/emailScanWatermark.dart';
 
 import 'addButton.dart';
 
@@ -469,7 +470,6 @@ Future<void> parseEmailsInBackground(context,
   //Only run this once, don't run again if the global state changes (e.g. when changing a setting)
   if (entireAppLoaded == false || forceParse) {
     if (appStateSettings["AutoTransactions-canReadEmails"] == true) {
-      List<Transaction> transactionsToAdd = [];
       Stopwatch stopwatch = new Stopwatch()..start();
       print("Scanning emails");
 
@@ -487,19 +487,14 @@ Future<void> parseEmailsInBackground(context,
         return;
       }
 
-      List<dynamic> emailsParsed =
-          appStateSettings["EmailAutoTransactions-emailsParsed"] ?? [];
-      int amountOfEmails =
-          appStateSettings["EmailAutoTransactions-amountOfEmails"] ?? 10;
-      int newEmailCount = 0;
+      int nowMs = DateTime.now().millisecondsSinceEpoch;
+      int watermarkMs =
+          appStateSettings["EmailAutoTransactions-lastScannedEpochMs"] ??
+              initialWatermarkMs(nowMs, await database.hasEmailTransactions());
 
       final authHeaders = await googleUser!.authHeaders;
       final authenticateClient = GoogleAuthClient(authHeaders);
       gMail.GmailApi gmailApi = gMail.GmailApi(authenticateClient);
-      gMail.ListMessagesResponse results = await gmailApi.users.messages
-          .list(googleUser!.id.toString(), maxResults: amountOfEmails);
-
-      int currentEmailIndex = 0;
 
       List<ScannerTemplate> scannerTemplates =
           await database.getAllScannerTemplates();
@@ -509,42 +504,68 @@ Future<void> parseEmailsInBackground(context,
             title:
                 "You have not setup the email scanning configuration in settings.",
             onTap: () {
-              pushRoute(
-                context,
-                AutoTransactionsPageEmail(),
-              );
+              pushRoute(context, AutoTransactionsPageEmail());
             },
           ),
         );
       }
-      for (gMail.Message message in results.messages!) {
+
+      // List all message ids received after the watermark (ids only = cheap),
+      // newest-first, paginating up to a generous safety cap.
+      final String query = buildGmailAfterQuery(watermarkMs);
+      List<gMail.Message> listed = [];
+      String? pageToken;
+      int listedPages = 0;
+      do {
+        gMail.ListMessagesResponse results =
+            await gmailApi.users.messages.list(
+          googleUser!.id.toString(),
+          q: query,
+          maxResults: emailScanPageSize,
+          pageToken: pageToken,
+        );
+        if (results.messages != null) listed.addAll(results.messages!);
+        pageToken = results.nextPageToken;
+        listedPages++;
+      } while (pageToken != null && listedPages < emailScanMaxListPages);
+
+      // Gmail returns newest-first; process oldest-first (capped) so older mail
+      // is not skipped and the watermark advances forward across scans.
+      List<gMail.Message> toProcess =
+          listed.reversed.take(emailScanMaxProcessPerScan).toList();
+
+      List<Transaction> transactionsToAdd = [];
+      List<int> handledInternalDatesMs = [];
+      int newEmailCount = 0;
+      int currentEmailIndex = 0;
+
+      for (gMail.Message message in toProcess) {
         currentEmailIndex++;
         loadingProgressKey.currentState
-            ?.setProgressPercentage(currentEmailIndex / amountOfEmails);
-        // await Future.delayed(Duration(milliseconds: 1000));
-
-        // Remove this to always parse emails
-        if (emailsParsed.contains(message.id!)) {
-          print("Already checked this email!");
-          continue;
-        }
-        newEmailCount++;
+            ?.setProgressPercentage(currentEmailIndex / toProcess.length);
 
         gMail.Message messageData = await gmailApi.users.messages
             .get(googleUser!.id.toString(), message.id!);
-        DateTime messageDate = DateTime.fromMillisecondsSinceEpoch(
-            int.parse(messageData.internalDate ?? ""));
+        int internalDateMs = int.tryParse(messageData.internalDate ?? "") ?? 0;
+
+        // Timestamp dedup: skip the boundary-second overlap the (second-granular)
+        // after: query can re-return.
+        if (!isNewerThanWatermark(internalDateMs, watermarkMs)) {
+          continue;
+        }
+        // Fully examined from here on -> record so the watermark advances past
+        // this email regardless of outcome (match, no-match, or skip).
+        handledInternalDatesMs.add(internalDateMs);
+
+        DateTime messageDate =
+            DateTime.fromMillisecondsSinceEpoch(internalDateMs);
         String messageString = getEmailMessage(messageData);
-        print("Adding transaction based on email");
 
         String? title;
         double? amountDouble;
-
-        bool doesEmailContain = false;
         ScannerTemplate? templateFound;
         for (ScannerTemplate scannerTemplate in scannerTemplates) {
           if (messageString.contains(scannerTemplate.contains)) {
-            doesEmailContain = true;
             templateFound = scannerTemplate;
             title = getTransactionTitleFromEmail(
               messageString,
@@ -560,64 +581,48 @@ Future<void> parseEmailsInBackground(context,
           }
         }
 
-        if (doesEmailContain == false) {
-          emailsParsed.insert(0, message.id!);
+        if (templateFound == null) continue;
+        if (title == null) {
+          openSnackbar(SnackbarMessage(
+            title:
+                "Couldn't find title in email. Check the email settings page for more information.",
+            onTap: () {
+              pushRoute(context, AutoTransactionsPageEmail());
+            },
+          ));
           continue;
         }
-
-        if (title == null) {
-          openSnackbar(
-            SnackbarMessage(
-              title:
-                  "Couldn't find title in email. Check the email settings page for more information.",
-              onTap: () {
-                pushRoute(
-                  context,
-                  AutoTransactionsPageEmail(),
-                );
-              },
-            ),
-          );
-          emailsParsed.insert(0, message.id!);
-          continue;
-        } else if (amountDouble == null) {
-          openSnackbar(
-            SnackbarMessage(
-              title:
-                  "Couldn't find amount in email. Check the email settings page for more information.",
-              onTap: () {
-                pushRoute(
-                  context,
-                  AutoTransactionsPageEmail(),
-                );
-              },
-            ),
-          );
-
-          emailsParsed.insert(0, message.id!);
+        if (amountDouble == null) {
+          openSnackbar(SnackbarMessage(
+            title:
+                "Couldn't find amount in email. Check the email settings page for more information.",
+            onTap: () {
+              pushRoute(context, AutoTransactionsPageEmail());
+            },
+          ));
           continue;
         }
 
         TransactionAssociatedTitleWithCategory? foundTitle =
             (await database.getSimilarAssociatedTitles(title: title, limit: 1))
                 .firstOrNull;
-
         TransactionCategory? selectedCategory = foundTitle?.category;
         if (selectedCategory == null) {
           selectedCategory = await aiCategorizeEmailMerchant(title);
         }
+        if (selectedCategory == null) {
+          // Fall back to the template's default category (always set) so a
+          // matched email is never lost when the cache misses and AI is
+          // unavailable — and so the watermark can safely advance past it.
+          selectedCategory = await database
+              .getCategoryInstanceOrNull(templateFound.defaultCategoryFk);
+        }
         if (selectedCategory == null) continue;
 
-        // Cache against the full merchant title (e.g. "Chipotle #1234") so the
-        // next scan of the same merchant is a cache hit and Gemini is not
-        // re-queried. A different store number (e.g. "Chipotle #2345") is a
-        // distinct key and will miss as intended. filterEmailTitle is applied
-        // afterwards only to clean up the displayed transaction name.
         await addAssociatedTitles(title, selectedCategory);
-
         title = filterEmailTitle(title);
 
-        Transaction transactionToAdd = Transaction(
+        transactionsToAdd.add(Transaction(
           transactionPk: "-1",
           name: title,
           amount: (amountDouble).abs() * (selectedCategory.income ? 1 : -1),
@@ -630,59 +635,54 @@ Future<void> parseEmailsInBackground(context,
           paid: true,
           skipPaid: false,
           methodAdded: MethodAdded.email,
-        );
-        transactionsToAdd.add(transactionToAdd);
-        openSnackbar(
-          SnackbarMessage(
-            title: templateFound!.templateName + ": " + "From Email",
-            description: title,
-            icon: appStateSettings["outlinedIcons"]
-                ? Icons.payments_outlined
-                : Icons.payments_rounded,
-          ),
-        );
-        // TODO have setting so they can choose if the emails are markes as read
+        ));
+        newEmailCount++;
+        openSnackbar(SnackbarMessage(
+          title: templateFound.templateName + ": " + "From Email",
+          description: title,
+          icon: appStateSettings["outlinedIcons"]
+              ? Icons.payments_outlined
+              : Icons.payments_rounded,
+        ));
+        // TODO have setting so they can choose if the emails are marked as read
         gmailApi.users.messages.modify(
           gMail.ModifyMessageRequest(removeLabelIds: ["UNREAD"]),
           googleUser!.id,
           message.id!,
         );
-
-        emailsParsed.insert(0, message.id!);
       }
+
       // wait for intro animation to finish
       if (Duration(milliseconds: 2500) > stopwatch.elapsed) {
-        print("waited extra" +
-            (Duration(milliseconds: 2500) - stopwatch.elapsed).toString());
         await Future.delayed(
             Duration(milliseconds: 2500) - stopwatch.elapsed, () {});
       }
+
       for (Transaction transaction in transactionsToAdd) {
         await database.createOrUpdateTransaction(insert: true, transaction);
       }
-      List<dynamic> emails = [
-        ...emailsParsed
-            .take(appStateSettings["EmailAutoTransactions-amountOfEmails"] + 10)
-      ];
-      updateSettings(
-        "EmailAutoTransactions-emailsParsed",
-        emails, // Keep 10 extra in case maybe the user deleted some emails recently
-        updateGlobalState: false,
-      );
+
+      // Advance & persist the watermark only after inserts committed, so an
+      // interruption never advances past an uncommitted transaction.
+      int newWatermarkMs = advanceWatermark(watermarkMs, handledInternalDatesMs);
+      if (newWatermarkMs > watermarkMs) {
+        await updateSettings(
+            "EmailAutoTransactions-lastScannedEpochMs", newWatermarkMs,
+            updateGlobalState: false);
+      }
+
       if (newEmailCount > 0 || sayUpdates == true)
-        openSnackbar(
-          SnackbarMessage(
-            title: "Scanned " + results.messages!.length.toString() + " emails",
-            description: newEmailCount.toString() +
-                pluralString(newEmailCount == 1, " new email"),
-            icon: appStateSettings["outlinedIcons"]
-                ? Icons.mark_email_unread_outlined
-                : Icons.mark_email_unread_rounded,
-            onTap: () {
-              pushRoute(context, AutoTransactionsPageEmail());
-            },
-          ),
-        );
+        openSnackbar(SnackbarMessage(
+          title: "Scanned " + toProcess.length.toString() + " emails",
+          description: newEmailCount.toString() +
+              pluralString(newEmailCount == 1, " new email"),
+          icon: appStateSettings["outlinedIcons"]
+              ? Icons.mark_email_unread_outlined
+              : Icons.mark_email_unread_rounded,
+          onTap: () {
+            pushRoute(context, AutoTransactionsPageEmail());
+          },
+        ));
     }
   }
 }
