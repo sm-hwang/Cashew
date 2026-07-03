@@ -16,7 +16,7 @@ Future<String?> aiCategorizeMerchant({
   required String merchant,
   required List<AiCategoryChoice> categories,
   required String apiKey,
-  String model = 'gemini-2.0-flash',
+  String model = 'gemini-flash-latest',
   http.Client? client,
 }) async {
   if (apiKey.trim().isEmpty) return null;
@@ -31,7 +31,7 @@ Future<String?> aiCategorizeMerchant({
         categories.map((c) => '- ${c.id}: ${c.name}').join('\n');
 
     final url = Uri.parse(
-        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey');
+        'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent');
 
     final requestBody = jsonEncode({
       'contents': [
@@ -60,7 +60,12 @@ Future<String?> aiCategorizeMerchant({
 
     final response = await httpClient.post(
       url,
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        // Authenticate via header (works with newer "AQ." keys; the ?key=
+        // query param does not reliably accept them).
+        'x-goog-api-key': apiKey,
+      },
       body: requestBody,
     );
 

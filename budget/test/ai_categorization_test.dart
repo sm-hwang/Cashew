@@ -10,6 +10,37 @@ const _cats = [
 ];
 
 void main() {
+  test('authenticates via x-goog-api-key header, not a ?key= query param',
+      () async {
+    late http.Request captured;
+    final mock = MockClient((req) async {
+      captured = req;
+      return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': '{"categoryId": "food"}'}
+                  ]
+                }
+              }
+            ]
+          }),
+          200);
+    });
+
+    final result = await aiCategorizeMerchant(
+      merchant: 'X',
+      categories: _cats,
+      apiKey: 'AQ.testkey',
+      client: mock,
+    );
+    expect(result, 'food');
+    expect(captured.headers['x-goog-api-key'], 'AQ.testkey');
+    expect(captured.url.query.contains('key='), isFalse);
+  });
+
   test('returns the chosen category id on a valid response', () async {
     final mock = MockClient((req) async {
       // Gemini wraps the JSON output as text inside candidates.
