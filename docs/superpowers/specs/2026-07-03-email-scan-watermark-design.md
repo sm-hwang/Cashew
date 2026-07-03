@@ -46,7 +46,7 @@ becomes purely timestamp-based (`internalDate_ms > watermark`), which lets us
 | First-run watermark | `now − 30 days` **if no existing email-scanned transactions**, else `now`. |
 | Backfill semantics | One-time 30-day backfill on first run, then watermark auto-advances (not perpetual re-scan). |
 | Query filtering | `after:<epoch>` only; no sender/phrase filter (match in-app). |
-| Per-scan cap | ~500 messages (5 pages of 100); if hit, advance to what was processed and continue next scan. |
+| Per-scan cap | List all IDs (cheap), but `get()`+process at most the **oldest** 500 per scan; advance to the newest processed so the next scan continues forward. |
 | Watermark advance | To the `internalDate` of the latest fully-examined email; forward-only; never past an uncommitted transaction. |
 
 ## Architecture
@@ -65,12 +65,19 @@ becomes purely timestamp-based (`internalDate_ms > watermark`), which lets us
 
 - Build the Gmail query from the watermark:
   `q = "after:" + (watermarkMs ~/ 1000)` (Gmail's query is second-granular).
-- `messages.list(userId, q: query, maxResults: 100)`, then follow
-  `nextPageToken` until absent **or** the per-scan cap is reached.
-- **Cap:** stop after `maxPages = 5` (~500 messages). Gmail returns messages
-  newest-first; because we advance the watermark to what we processed, a capped
-  scan simply resumes from where it left off on the next run.
-- Collect the message IDs from all fetched pages.
+- **List all pages** of message IDs: `messages.list(userId, q: query,
+  maxResults: 100)`, following `nextPageToken` until absent. `list` returns only
+  ids (no bodies), so this is cheap (5 quota units/page) even for a large
+  window. A generous listing safety cap (100 pages / ~10k ids) guards against a
+  pathological unbounded case.
+- Gmail returns messages **newest-first**. Reverse the collected ids to get
+  **oldest-first** order.
+- **Per-scan processing cap:** `get()` + process at most the **oldest 500**
+  (`emailScanMaxProcessPerScan`). This bounds the expensive work (`get` per
+  message + Gemini per new merchant) without missing older mail: because we
+  process oldest-first and advance the watermark to the newest *processed*
+  message, the next scan's `after:` query naturally continues with the emails
+  that were left over.
 
 ### Section 3 — Per-message processing & timestamp dedup
 
