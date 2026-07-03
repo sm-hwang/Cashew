@@ -87,6 +87,10 @@ dynamic transactionTypeDisplayToEnum = {
   TransactionSpecialType.credit: "Lent",
 };
 
+// Number of AddTransactionPage instances currently mounted. Used to guard the
+// ⌘/Ctrl+N shortcut from stacking a second add/edit-transaction page.
+int openAddTransactionPages = 0;
+
 class AddTransactionPage extends StatefulWidget {
   AddTransactionPage({
     Key? key,
@@ -724,8 +728,15 @@ class _AddTransactionPageState extends State<AddTransactionPage>
   late TextEditingController _noteInputController;
 
   @override
+  void dispose() {
+    openAddTransactionPages--;
+    super.dispose();
+  }
+
+  @override
   void initState() {
     super.initState();
+    openAddTransactionPages++;
     if (widget.transaction != null) {
       //We are editing a transaction
       //Fill in the information from the passed in transaction

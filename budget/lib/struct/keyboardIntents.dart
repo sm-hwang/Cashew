@@ -1,6 +1,9 @@
 import 'package:budget/functions.dart';
 import 'package:budget/main.dart';
+import 'package:budget/pages/addTransactionPage.dart';
+import 'package:budget/pages/transactionsSearchPage.dart';
 import 'package:budget/widgets/navigationFramework.dart';
+import 'package:budget/widgets/openPopup.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -44,6 +47,37 @@ Map<Type, Action<Intent>> keyboardIntents = {
       if (!navigatorKey.currentState!.canPop())
         pageNavigationFrameworkKey.currentState!
             .changePage(3, switchNavbar: true)
+    },
+  ),
+  NewTransactionIntent: CallbackAction<NewTransactionIntent>(
+    onInvoke: (NewTransactionIntent intent) {
+      // Guard against stacking a second add/edit-transaction page.
+      if (openAddTransactionPages == 0) {
+        pushRoute(
+            navigatorKey.currentContext,
+            AddTransactionPage(
+                routesToPopAfterDelete: RoutesToPopAfterDelete.None));
+      }
+      return null;
+    },
+  ),
+  SearchTransactionsIntent: CallbackAction<SearchTransactionsIntent>(
+    onInvoke: (SearchTransactionsIntent intent) {
+      pushRoute(navigatorKey.currentContext, TransactionsSearchPage());
+      return null;
+    },
+  ),
+  OpenSettingsIntent: CallbackAction<OpenSettingsIntent>(
+    onInvoke: (OpenSettingsIntent intent) {
+      pageNavigationFrameworkKey.currentState?.changePage(3, switchNavbar: true);
+      return null;
+    },
+  ),
+  RefreshSyncIntent: CallbackAction<RefreshSyncIntent>(
+    onInvoke: (RefreshSyncIntent intent) {
+      final ctx = navigatorKey.currentContext;
+      if (ctx != null) runAllCloudFunctions(ctx);
+      return null;
     },
   ),
 };
