@@ -61,3 +61,5 @@ keystore.jks
 
 # FVM Version Cache
 .fvm/
+# Local debug run log
+error.txt
