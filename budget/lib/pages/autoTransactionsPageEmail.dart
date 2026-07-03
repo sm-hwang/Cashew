@@ -710,7 +710,18 @@ double? getTransactionAmountFromEmail(String messageString,
         amountTransactionBefore.length;
     int endIndex = messageString.indexOf(amountTransactionAfter, startIndex);
     String amountString = messageString.substring(startIndex, endIndex);
-    amountDouble = double.parse(amountString.replaceAll(RegExp('[^0-9.]'), ''));
+    // The amount sits at the end of the substring (right before the "after"
+    // delimiter). A merchant name glued in front of it may itself contain
+    // digits (e.g. "COFFEE 0093$36.19"), so we take the LAST number rather
+    // than stripping all non-digits, which would concatenate them.
+    final matches =
+        RegExp(r'[0-9][0-9,]*(?:\.[0-9]+)?').allMatches(amountString).toList();
+    if (matches.isNotEmpty) {
+      amountDouble = double.parse(matches.last.group(0)!.replaceAll(',', ''));
+    } else {
+      amountDouble =
+          double.parse(amountString.replaceAll(RegExp('[^0-9.]'), ''));
+    }
   } catch (e) {}
   return amountDouble;
 }
