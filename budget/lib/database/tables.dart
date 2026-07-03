@@ -3382,6 +3382,14 @@ class FinanceDatabase extends _$FinanceDatabase {
     return query.map((row) => row.read(totalCount)).get();
   }
 
+  Future<bool> hasEmailTransactions() async {
+    final count = transactions.transactionPk.count(
+        filter: transactions.methodAdded.equalsValue(MethodAdded.email));
+    final query = selectOnly(transactions)..addColumns([count]);
+    final result = await query.map((row) => row.read(count)).getSingle();
+    return (result ?? 0) > 0;
+  }
+
   Future<Transaction> getTransactionFromRowId(int rowId) {
     return (select(transactions)..where((t) => t.rowId.equals(rowId)))
         .getSingle();
