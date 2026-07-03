@@ -80,8 +80,56 @@ void main() {
     expect(result, isNull);
   });
 
-  test('returns null on HTTP error (e.g. rate limit 429)', () async {
-    final mock = MockClient((req) async => http.Response('rate limited', 429));
+  test('gives up and returns null when 429 persists past retries', () async {
+    var calls = 0;
+    final mock = MockClient((req) async {
+      calls++;
+      return http.Response('rate limited', 429);
+    });
+    final result = await aiCategorizeMerchant(
+      merchant: 'X',
+      categories: _cats,
+      apiKey: 'k',
+      client: mock,
+      maxRetries: 3,
+      initialRetryDelay: Duration.zero,
+    );
+    expect(result, isNull);
+    expect(calls, 4); // initial attempt + 3 retries
+  });
+
+  test('retries after a 429 and succeeds', () async {
+    var calls = 0;
+    final mock = MockClient((req) async {
+      calls++;
+      if (calls == 1) return http.Response('rate limited', 429);
+      return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'content': {
+                  'parts': [
+                    {'text': '{"categoryId": "travel"}'}
+                  ]
+                }
+              }
+            ]
+          }),
+          200);
+    });
+    final result = await aiCategorizeMerchant(
+      merchant: 'DELTA',
+      categories: _cats,
+      apiKey: 'k',
+      client: mock,
+      initialRetryDelay: Duration.zero,
+    );
+    expect(result, 'travel');
+    expect(calls, 2);
+  });
+
+  test('returns null on a non-retryable HTTP error (400)', () async {
+    final mock = MockClient((req) async => http.Response('bad request', 400));
     final result = await aiCategorizeMerchant(
         merchant: 'X', categories: _cats, apiKey: 'k', client: mock);
     expect(result, isNull);

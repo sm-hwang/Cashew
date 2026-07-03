@@ -12,12 +12,26 @@ class AiCategoryChoice {
 // Classifies a merchant into one of [categories] using Gemini Flash.
 // Returns the chosen category id (always one of [categories]) or null on ANY
 // failure. This function never throws.
+// Parses a Retry-After header (integer seconds) into a Duration, or null.
+Duration? _parseRetryAfter(String? headerValue) {
+  if (headerValue == null) return null;
+  final seconds = int.tryParse(headerValue.trim());
+  if (seconds == null || seconds < 0) return null;
+  return Duration(seconds: seconds);
+}
+
 Future<String?> aiCategorizeMerchant({
   required String merchant,
   required List<AiCategoryChoice> categories,
   required String apiKey,
   String model = 'gemini-flash-latest',
   http.Client? client,
+  // Retry handling for rate limits: the free tier returns 429 on bursts.
+  // On the first scan many new merchants are queried at once; retry with
+  // backoff so those results aren't lost (each merchant is cached after,
+  // so later scans make far fewer calls).
+  int maxRetries = 4,
+  Duration initialRetryDelay = const Duration(seconds: 2),
 }) async {
   if (apiKey.trim().isEmpty) return null;
   if (categories.isEmpty) return null;
@@ -58,20 +72,33 @@ Future<String?> aiCategorizeMerchant({
       }
     });
 
-    final response = await httpClient.post(
-      url,
-      headers: {
-        'Content-Type': 'application/json',
-        // Authenticate via header (works with newer "AQ." keys; the ?key=
-        // query param does not reliably accept them).
-        'x-goog-api-key': apiKey,
-      },
-      body: requestBody,
-    );
+    http.Response? response;
+    Duration delay = initialRetryDelay;
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      response = await httpClient.post(
+        url,
+        headers: {
+          'Content-Type': 'application/json',
+          // Authenticate via header (works with newer "AQ." keys; the ?key=
+          // query param does not reliably accept them).
+          'x-goog-api-key': apiKey,
+        },
+        body: requestBody,
+      );
 
-    if (response.statusCode != 200) {
+      // Only 429 (rate limited) and 503 (overloaded) are worth retrying.
+      if (response.statusCode != 429 && response.statusCode != 503) break;
+      if (attempt == maxRetries) break;
+      final retryAfter = _parseRetryAfter(response.headers['retry-after']);
       print(
-          'aiCategorizeMerchant: HTTP ${response.statusCode}: ${response.body}');
+          'aiCategorizeMerchant: HTTP ${response.statusCode}, retrying in ${(retryAfter ?? delay).inSeconds}s (attempt ${attempt + 1}/$maxRetries)');
+      await Future.delayed(retryAfter ?? delay);
+      delay *= 2;
+    }
+
+    if (response == null || response.statusCode != 200) {
+      print(
+          'aiCategorizeMerchant: HTTP ${response?.statusCode}: ${response?.body}');
       return null;
     }
 
